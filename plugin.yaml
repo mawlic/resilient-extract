@@ -1,0 +1,9 @@
+name: web-resilient-extract
+version: 1.1.0
+description: Ordered Firecrawl and Bright Data extraction with bounded Browser Use fallback
+author: Oleg Tretyak
+kind: backend
+license: MIT
+provides_web_providers:
+  - resilient-extract
+requires_env: []
