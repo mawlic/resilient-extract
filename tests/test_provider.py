@@ -16,8 +16,17 @@ if "agent.web_search_provider" not in sys.modules:
         agent_module = types.ModuleType("agent")
         web_module = types.ModuleType("agent.web_search_provider")
         setattr(web_module, "WebSearchProvider", type("WebSearchProvider", (), {}))
+        setattr(agent_module, "__path__", [])
         sys.modules.setdefault("agent", agent_module)
         sys.modules["agent.web_search_provider"] = web_module
+
+try:
+    import agent.web_search_registry  # noqa: F401
+except (ImportError, ModuleNotFoundError):
+    registry_module = types.ModuleType("agent.web_search_registry")
+    setattr(registry_module, "get_provider", lambda _name: None)
+    setattr(sys.modules["agent"], "web_search_registry", registry_module)
+    sys.modules["agent.web_search_registry"] = registry_module
 
 try:
     import hermes_cli.config  # noqa: F401

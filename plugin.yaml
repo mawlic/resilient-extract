@@ -1,5 +1,5 @@
 name: web-resilient-extract
-version: 1.2.2
+version: 1.2.3
 description: Direct Reddit Atom plus ordered Firecrawl, Bright Data and bounded Browser Use fallback
 author: Oleg Tretyak
 kind: backend
