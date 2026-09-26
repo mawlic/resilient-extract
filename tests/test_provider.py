@@ -4,6 +4,7 @@ import asyncio
 import importlib.util
 import logging
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -323,6 +324,68 @@ def test_plugin_registers_resilient_extract_provider():
     assert context.provider is not None
     assert context.provider.name == "resilient-extract"
     assert context.provider.supports_extract()
+
+
+def test_reddit_atom_uses_direct_free_backend_before_external_extractors():
+    class Primary:
+        def __init__(self):
+            self.calls = []
+
+        def is_available(self):
+            return True
+
+        async def extract(self, urls, **_kwargs):
+            self.calls.extend(urls)
+            return [{"url": url, "title": "Primary", "content": "page"} for url in urls]
+
+    class DirectAtom:
+        def __init__(self):
+            self.calls = []
+
+        def extract_many(self, urls):
+            self.calls.extend(urls)
+            return {
+                url: {
+                    "url": url,
+                    "title": "Reddit Atom",
+                    "content": "<feed><entry><title>fresh</title></entry></feed>",
+                }
+                for url in urls
+            }
+
+    primary = Primary()
+    direct = DirectAtom()
+    rss_url = "https://www.reddit.com/r/defi+CryptoCurrency/new/.rss?limit=30"
+    normal_url = "https://example.com/page"
+    provider = ResilientExtractProvider(
+        primary_provider=primary,
+        direct_atom_adapter=direct,
+        browser_adapter=StubBrowser(),
+    )
+
+    results = asyncio.run(provider.extract([rss_url, normal_url]))
+
+    assert direct.calls == [rss_url]
+    assert primary.calls == [normal_url]
+    assert results[0]["content"].startswith("<feed>")
+    assert results[0]["backend_used"] == "direct-atom"
+    assert results[0]["attempted_backends"] == ["direct-atom"]
+    assert results[1]["backend_used"] == "firecrawl"
+
+
+def test_browser_adapter_uses_current_lifecycle_cleanup_module(monkeypatch):
+    browser_module = types.ModuleType("tools.browser_tool")
+    setattr(browser_module, "browser_console", lambda **_kwargs: None)
+    setattr(browser_module, "browser_navigate", lambda *_args, **_kwargs: None)
+    lifecycle_module = types.ModuleType("tools.browser_tool_lifecycle")
+    cleanup = lambda **_kwargs: None
+    setattr(lifecycle_module, "cleanup_browser", cleanup)
+    monkeypatch.setitem(sys.modules, "tools.browser_tool", browser_module)
+    monkeypatch.setitem(sys.modules, "tools.browser_tool_lifecycle", lifecycle_module)
+
+    adapter = BrowserFallbackAdapter()
+
+    assert adapter._cleanup is cleanup
 
 
 def test_browser_failure_is_reported_with_primary_error():

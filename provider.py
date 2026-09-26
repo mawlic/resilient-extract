@@ -4,9 +4,13 @@ import asyncio
 import inspect
 import json
 import logging
+import time
 import uuid
+import xml.etree.ElementTree as ET
 from typing import Any, Dict, List, Optional
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 from agent.web_search_provider import WebSearchProvider
 
@@ -51,6 +55,77 @@ _BOT_PAGE_MARKERS = (
 )
 
 
+def _is_reddit_atom_url(url: str) -> bool:
+    parsed = urlparse(url)
+    hostname = (parsed.hostname or "").lower()
+    return (
+        parsed.scheme in {"http", "https"}
+        and hostname in {"reddit.com", "www.reddit.com"}
+        and parsed.path.rstrip("/").endswith(".rss")
+    )
+
+
+class DirectAtomAdapter:
+    """Fetch public Reddit Atom directly before paid/external extractors."""
+
+    _HEADERS = {
+        "Accept": "application/atom+xml, application/xml;q=0.9, text/xml;q=0.8",
+        "User-Agent": "HermesAgent/1.0 (+https://github.com/NousResearch/hermes-agent)",
+    }
+
+    @staticmethod
+    def _retry_delay(headers) -> float:
+        for name in ("Retry-After", "x-ratelimit-reset"):
+            raw = headers.get(name) if headers is not None else None
+            if raw:
+                try:
+                    return max(1.0, min(float(raw), 120.0))
+                except (TypeError, ValueError):
+                    continue
+        return 60.0
+
+    def extract_many(self, urls: List[str]) -> Dict[str, Dict[str, Any]]:
+        results: Dict[str, Dict[str, Any]] = {}
+        for url in urls:
+            for attempt in range(2):
+                try:
+                    request = Request(url, headers=self._HEADERS)
+                    with urlopen(request, timeout=25) as response:
+                        raw = response.read()
+                        status = int(getattr(response, "status", 200))
+                    root = ET.fromstring(raw)
+                    root_name = root.tag.rsplit("}", 1)[-1].lower()
+                    if root_name not in {"feed", "rss"}:
+                        raise ValueError(f"unexpected XML root {root_name!r}")
+                    results[url] = {
+                        "url": url,
+                        "title": "Reddit Atom",
+                        "content": raw.decode("utf-8", errors="replace"),
+                        "status_code": status,
+                    }
+                    break
+                except HTTPError as exc:
+                    if exc.code == 429 and attempt == 0:
+                        time.sleep(self._retry_delay(exc.headers))
+                        continue
+                    results[url] = {
+                        "url": url,
+                        "title": "",
+                        "content": "",
+                        "error": f"Direct Atom HTTP {exc.code}",
+                    }
+                    break
+                except (URLError, TimeoutError, ET.ParseError, ValueError) as exc:
+                    results[url] = {
+                        "url": url,
+                        "title": "",
+                        "content": "",
+                        "error": f"Direct Atom failed: {exc}",
+                    }
+                    break
+        return results
+
+
 def load_plugin_settings() -> Dict[str, Any]:
     try:
         from hermes_cli.config import load_config
@@ -85,7 +160,8 @@ class BrowserFallbackAdapter:
 
     def __init__(self, *, navigate=None, evaluate=None, cleanup=None) -> None:
         if navigate is None or evaluate is None or cleanup is None:
-            from tools.browser_tool import browser_console, browser_navigate, cleanup_browser
+            from tools.browser_tool import browser_console, browser_navigate
+            from tools.browser_tool_lifecycle import cleanup_browser
 
             navigate = navigate or browser_navigate
             evaluate = evaluate or browser_console
@@ -158,6 +234,7 @@ class ResilientExtractProvider(WebSearchProvider):
         secondary_provider=None,
         secondary_backend: str = "",
         prefer_secondary_domains: Optional[List[str]] = None,
+        direct_atom_adapter=None,
         browser_adapter=None,
         max_browser_fallbacks_per_call: int = 10,
     ) -> None:
@@ -170,6 +247,7 @@ class ResilientExtractProvider(WebSearchProvider):
             for domain in (prefer_secondary_domains or [])
             if domain.strip()
         )
+        self._direct_atom_adapter = direct_atom_adapter
         self._browser_adapter = browser_adapter
         self._max_browser_fallbacks_per_call = max(0, int(max_browser_fallbacks_per_call))
 
@@ -261,27 +339,51 @@ class ResilientExtractProvider(WebSearchProvider):
         return None
 
     async def extract(self, urls: List[str], **kwargs) -> List[Dict[str, Any]]:
-        primary_provider = self._resolve_primary_provider()
-        if primary_provider is None:
-            return [
-                {
-                    "url": url,
+        pending_results: List[Optional[Dict[str, Any]]] = [None] * len(urls)
+        direct_failures: Dict[int, str] = {}
+        direct_indexes = [index for index, url in enumerate(urls) if _is_reddit_atom_url(url)]
+        if direct_indexes:
+            direct_adapter = self._direct_atom_adapter or DirectAtomAdapter()
+            direct_results = await asyncio.to_thread(
+                direct_adapter.extract_many,
+                [urls[index] for index in direct_indexes],
+            )
+            for index in direct_indexes:
+                item = direct_results.get(urls[index]) or {
+                    "url": urls[index],
                     "title": "",
                     "content": "",
-                    "error": f"Primary extract backend '{self._primary_backend}' is unavailable",
+                    "error": "Direct Atom backend returned no result",
                 }
-                for url in urls
-            ]
+                if item.get("error"):
+                    direct_failures[index] = str(item["error"])
+                    continue
+                item["backend_used"] = "direct-atom"
+                item["attempted_backends"] = ["direct-atom"]
+                pending_results[index] = item
+
+        primary_provider = self._resolve_primary_provider()
+        if primary_provider is None:
+            for index, url in enumerate(urls):
+                if pending_results[index] is None:
+                    pending_results[index] = {
+                        "url": url,
+                        "title": "",
+                        "content": "",
+                        "error": f"Primary extract backend '{self._primary_backend}' is unavailable",
+                    }
+            return [item for item in pending_results if item is not None]
         secondary_provider = self._resolve_secondary_provider()
         primary_indexes = []
         secondary_indexes = []
         for index, url in enumerate(urls):
+            if pending_results[index] is not None:
+                continue
             if secondary_provider is not None and self._prefers_secondary(url):
                 secondary_indexes.append(index)
             else:
                 primary_indexes.append(index)
 
-        pending_results: List[Optional[Dict[str, Any]]] = [None] * len(urls)
         if primary_indexes:
             primary_results = await self._call_provider(
                 primary_provider,
@@ -290,6 +392,9 @@ class ResilientExtractProvider(WebSearchProvider):
             )
             for index, item in zip(primary_indexes, primary_results):
                 item.setdefault("backend_used", self._primary_backend)
+                if index in direct_failures:
+                    item.setdefault("metadata", {})["direct_atom_error"] = direct_failures[index]
+                    item.setdefault("attempted_backends", ["direct-atom", self._primary_backend])
                 pending_results[index] = item
         if secondary_indexes:
             secondary_results = await self._call_provider(
@@ -299,6 +404,9 @@ class ResilientExtractProvider(WebSearchProvider):
             )
             for index, item in zip(secondary_indexes, secondary_results):
                 item.setdefault("backend_used", self._secondary_backend)
+                if index in direct_failures:
+                    item.setdefault("metadata", {})["direct_atom_error"] = direct_failures[index]
+                    item.setdefault("attempted_backends", ["direct-atom", self._secondary_backend])
                 pending_results[index] = item
 
         completed_results: List[Dict[str, Any]] = []

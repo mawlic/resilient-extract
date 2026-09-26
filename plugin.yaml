@@ -1,6 +1,6 @@
 name: web-resilient-extract
-version: 1.1.0
-description: Ordered Firecrawl and Bright Data extraction with bounded Browser Use fallback
+version: 1.2.0
+description: Direct Reddit Atom plus ordered Firecrawl, Bright Data and bounded Browser Use fallback
 author: Oleg Tretyak
 kind: backend
 license: MIT

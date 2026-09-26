@@ -13,10 +13,10 @@
 ### Task 1: Create the standalone Bright Data Web Unlocker provider
 
 **Files:**
-- Create: `/home/oleg.tretyak/.hermes/plugins/web/brightdata_unlocker/provider.py`
-- Create: `/home/oleg.tretyak/.hermes/plugins/web/brightdata_unlocker/__init__.py`
-- Create: `/home/oleg.tretyak/.hermes/plugins/web/brightdata_unlocker/plugin.yaml`
-- Test: `/home/oleg.tretyak/.hermes/plugins/web/brightdata_unlocker/tests/test_provider.py`
+- Create: `~/.hermes/plugins/web/brightdata_unlocker/provider.py`
+- Create: `~/.hermes/plugins/web/brightdata_unlocker/__init__.py`
+- Create: `~/.hermes/plugins/web/brightdata_unlocker/plugin.yaml`
+- Test: `~/.hermes/plugins/web/brightdata_unlocker/tests/test_provider.py`
 
 **Steps:**
 1. Write a failing provider-contract test for extraction-only registration and config loading.
@@ -43,8 +43,8 @@
 ### Task 3: Reproduce and fix successful CAPTCHA-page handling
 
 **Files:**
-- Modify: `/home/oleg.tretyak/.hermes/plugins/web/resilient_extract/provider.py`
-- Test: `/home/oleg.tretyak/.hermes/plugins/web/resilient_extract/tests/test_provider.py`
+- Modify: `~/.hermes/plugins/web/resilient_extract/provider.py`
+- Test: `~/.hermes/plugins/web/resilient_extract/tests/test_provider.py`
 
 **Steps:**
 1. Add a failing regression test where Firecrawl returns non-empty `Вы не робот?` content with no `error`.
@@ -76,7 +76,7 @@
 ### Task 5: Configure Hermes and verify in a fresh process
 
 **Files:**
-- Modify: `/home/oleg.tretyak/.hermes/config.yaml`
+- Modify: `~/.hermes/config.yaml`
 
 **Steps:**
 1. Add `web.brightdata_unlocker` settings for zone `web_unlocker1`, render, timeout, and bounded concurrency.

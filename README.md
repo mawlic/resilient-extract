@@ -11,15 +11,19 @@ debug what actually happened.
 
 Given a list of URLs, the plugin:
 
-1. Routes each URL to its **primary** or **secondary** extraction backend
+1. Fetches public Reddit `.rss` Atom URLs directly with a validated XML path,
+   before any paid or browser-backed extractor. HTTP 429 responses honor
+   `Retry-After` / `x-ratelimit-reset`; a failed direct attempt continues into
+   the normal resilient chain.
+2. Routes every other URL to its **primary** or **secondary** extraction backend
    based on the URL's hostname and your `prefer_secondary_domains` list.
-2. Detects retriable failures both in the error string and in the response
+3. Detects retriable failures both in the error string and in the response
    content itself (so a "successful" page that contains `Вы не робот` is
    correctly treated as a bot challenge).
-3. Tries the other HTTP extractor (the one that was not the primary) once.
-4. Falls back to a managed browser (Browser Use by default) for the URLs that
+4. Tries the other HTTP extractor (the one that was not the primary) once.
+5. Falls back to a managed browser (Browser Use by default) for the URLs that
    still failed, with a hard per-call budget.
-5. Stops on auth/config errors (`400/401/403/407`) instead of wasting credits.
+6. Stops on auth/config errors (`400/401/403/407`) instead of wasting credits.
 
 Each result carries:
 
@@ -56,6 +60,7 @@ browser:
 
 Routing:
 
+- Reddit Atom URLs: `direct-atom → firecrawl → brightdata-unlocker → browser-use`;
 - ordinary domains: `firecrawl → brightdata-unlocker → browser-use`;
 - domains listed in `prefer_secondary_domains`: `brightdata-unlocker →
   firecrawl → browser-use` (Firecrawl is skipped first because many Russian
@@ -99,8 +104,10 @@ The tests are pure-Python with `httpx.MockTransport`; no network is required.
 
 ## Status
 
-Verified live in production (2026-08-01) for `wildberries.ru`, `ozon.ru`,
-`avito.ru` via the `brightdata-unlocker` fallback path. See
+Version 1.2.0 was verified live on 2026-09-26 for a combined Reddit Atom feed;
+the result reported `backend_used: direct-atom` and returned valid feed XML.
+The established `wildberries.ru`, `ozon.ru`, and `avito.ru` fallback routes
+remain covered by regression tests. See
 [`hermes-web-access`](https://github.com/mawlic/hermes-web-access) for the
 cross-plugin architecture document, verified-targets table, and known
 restrictions.
