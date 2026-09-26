@@ -9,6 +9,25 @@ from pathlib import Path
 
 import pytest
 
+if "agent.web_search_provider" not in sys.modules:
+    try:
+        import agent.web_search_provider  # noqa: F401
+    except ModuleNotFoundError:
+        agent_module = types.ModuleType("agent")
+        web_module = types.ModuleType("agent.web_search_provider")
+        setattr(web_module, "WebSearchProvider", type("WebSearchProvider", (), {}))
+        sys.modules.setdefault("agent", agent_module)
+        sys.modules["agent.web_search_provider"] = web_module
+
+try:
+    import hermes_cli.config  # noqa: F401
+except (ImportError, ModuleNotFoundError):
+    hermes_cli_module = sys.modules.setdefault("hermes_cli", types.ModuleType("hermes_cli"))
+    config_module = types.ModuleType("hermes_cli.config")
+    setattr(config_module, "load_config", lambda: {})
+    setattr(hermes_cli_module, "config", config_module)
+    sys.modules["hermes_cli.config"] = config_module
+
 PLUGIN_DIR = Path(__file__).resolve().parents[1]
 if str(PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(PLUGIN_DIR))
