@@ -104,7 +104,7 @@ The tests are pure-Python with `httpx.MockTransport`; no network is required.
 
 ## Status
 
-Version 1.2.1 was verified live on 2026-09-26 for a combined Reddit Atom feed;
+Version 1.2.2 was verified live on 2026-09-26 for a combined Reddit Atom feed;
 the result reported `backend_used: direct-atom` and returned valid feed XML.
 The established `wildberries.ru`, `ozon.ru`, and `avito.ru` fallback routes
 remain covered by regression tests. See
